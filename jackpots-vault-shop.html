@@ -436,6 +436,7 @@ body{
 .cBtn:hover{background:#483e82}
 .cBtn.hot{background:#7a2f4a;border-color:#b24a6e}
 .cBtn.go{background:#2f6b45;border-color:#48a06a}
+.cBtn.on{background:#6b5a1e;border-color:#f5c542}
 .statGrid,.projGrid{display:grid;grid-template-columns:1fr auto;gap:3px 10px;font-size:12px}
 .statGrid .k,.projGrid .k{color:#a79bd8}
 .statGrid .v,.projGrid .v{text-align:right;font-variant-numeric:tabular-nums}
@@ -959,6 +960,18 @@ body{
 <div id="cheats">
   <h2>⚙ Cheats &amp; Balance</h2>
 
+  <h3>Balance preset</h3>
+  <div class="btnRow">
+    <button class="cBtn" id="btnPresetFull">Full event · 10 days</button>
+    <button class="cBtn" id="btnPresetTech">Tech test · 5 days (BR + MX)</button>
+  </div>
+  <div class="fieldRow" style="margin-top:6px">
+    <label for="chkCatchUp">Catch-up bank — missed days carry over, <span id="catchUpTxt"></span></label>
+    <input type="checkbox" id="chkCatchUp">
+  </div>
+  <div class="note">Switching preset resets the event and every balance edit. The tech test starts with
+    catch-up off; the toggle works for both presets.</div>
+
   <h3>Simulation</h3>
   <div class="btnRow">
     <button class="cBtn go" id="btnDay">▶ Progress one day (max chests)</button>
@@ -1031,6 +1044,7 @@ body{
    1. DEFAULT BALANCE
    ============================================================ */
 const DEFAULTS = {
+  preset: "full",
   eventDays: 10,
   chestsPerDay: 10,
   /* unused daily chest slots carry over to later days up to this many; banked chests spawn
@@ -1118,30 +1132,83 @@ const DEFAULTS = {
   lockedAvatarPool: 8
 };
 
+/* 5-day tech test in Brazil & Mexico (design doc §11). Half the days and every coin price halved,
+   so each persona reaches about the same milestones; pass bonuses and $ prices are unchanged. */
+function techTestBalance() {
+  const b = structuredClone(DEFAULTS);
+  Object.assign(b, {
+    preset: "tech",
+    eventDays: 5,
+    catchUpEnabled: false,
+    unlockTarget: 12000,
+    levelIntroCost: 500,
+    levelCost: 1250,
+    chestSpawn: [1, 1, 1, 1, 1, 1, 0.7, 0.7, 0.55, 0.55],
+    avatarPrice: DEFAULTS.avatarPrice.map(price => price / 2),
+    /* 3 windows (d1, d3, d5) × limit 4 = the same 12 of each pack as the full event */
+    packs: [
+      { amt: 1000, usd: 2.99, limit: 4 },
+      { amt: 2500, usd: 5.99, limit: 4 },
+      { amt: 5000, usd: 9.99, limit: 4 }
+    ],
+    packRefreshDays: 2
+  });
+  for (const o of b.offers) o.price /= 2;
+  return b;
+}
+
 /* Cards needed for each level-up of any card in game
    (Assets/_Game/Features/Armory/Config/EconomyConfig/Configs/CoinRework.csv, first row). */
 const CARD_LEVEL_CARDS = [3,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,115,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,950,1000,1050,1100,1150,1200,1250,1300,1350,1500,2000,2500,3000,3500,4000,4500,5000,5500,6000,6500,7000,7500,8000,8500,9000,9500,10000,10500,11000,11500,12000,12500,13000,13500,15000,20000,25000,30000,35000,40000,45000,50000,55000,60000,65000,70000,75000,80000,85000,90000,95000,100000,105000,110000,115000,120000,125000,130000,135000];
 
-/* Measured with DataWhisper, 20–29 Oct 2026, players at league ≥ 1, using the chest spawn table
-   1–5: 100% · 6–8: 60% · 9–10: 45%. Values are % of the max chest loot over the 10 days. */
+/* Measured with DataWhisper. Values are % of the max chest loot over the event, without a catch-up
+   bank unless stated. One set per balance preset, each measured with that preset's spawn table. */
 const PLAYER_DATA = {
-  groups: [
-    { name: "Casual (1–4 days)",  share: 77, p25: 4,  p50: 7,  p75: 13, p90: 20, ge30: 2  },
-    { name: "Regular (5+ days)",  share: 23, p25: 30, p50: 45, p75: 66, p90: 87, ge30: 72 },
-    { name: "All eligible",       share: 100, p25: 5, p50: 9,  p75: 22, p90: 49, ge30: 18 }
-  ],
-  regulars: [
-    { name: "Non-payers",           regShare: 21, p50: 43, p75: 62, p90: 83 },
-    { name: "Low payers (<$50/90d)", regShare: 56, p50: 61, p75: 82, p90: 96 },
-    { name: "High payers ($50+/90d)", regShare: 74, p50: 70, p75: 90, p90: 98 }
-  ],
-  /* effect of the catch-up bank on regulars (active 5+ of 10 days): bank size in chests,
-     mean % of max chest loot, and % of regulars collecting ≥95% / ≥75% / ≥50% of it */
-  bank: [
-    { size: 0,  mean: 44, ge95: 4,  ge75: 15, ge50: 37 },
-    { size: 10, mean: 48, ge95: 10, ge75: 22, ge50: 43 },
-    { size: 20, mean: 49, ge95: 11, ge75: 24, ge50: 44 }
-  ],
+  full: {
+    measured: "20–29 Oct 2026, league ≥ 1, all countries",
+    spawn: "1–5: 100% · 6–8: 60% · 9–10: 45%",
+    regularRule: "active 5+ of the 10 days",
+    groupExtra: { label: "≥30%", key: "ge30" },
+    groups: [
+      { name: "Casual (1–4 days)",  share: 77, p25: 4,  p50: 7,  p75: 13, p90: 20, ge30: 2  },
+      { name: "Regular (5+ days)",  share: 23, p25: 30, p50: 45, p75: 66, p90: 87, ge30: 72 },
+      { name: "All eligible",       share: 100, p25: 5, p50: 9,  p75: 22, p90: 49, ge30: 18 }
+    ],
+    regulars: [
+      { name: "Non-payers",           regShare: 21, p50: 43, p75: 62, p90: 83 },
+      { name: "Low payers (<$50/90d)", regShare: 56, p50: 61, p75: 82, p90: 96 },
+      { name: "High payers ($50+/90d)", regShare: 74, p50: 70, p75: 90, p90: 98 }
+    ],
+    /* effect of the catch-up bank on regulars: bank size in chests, mean % of max chest loot,
+       and % of regulars reaching each share of it */
+    bankCols: [["≥95%", "ge95"], ["≥75%", "ge75"], ["≥50%", "ge50"]],
+    bank: [
+      { size: 0,  mean: 44, ge95: 4,  ge75: 15, ge50: 37 },
+      { size: 10, mean: 48, ge95: 10, ge75: 22, ge50: 43 },
+      { size: 20, mean: 49, ge95: 11, ge75: 24, ge50: 44 }
+    ]
+  },
+  tech: {
+    measured: "three 5-day windows, 20 Oct–3 Nov 2026, league ≥ 1, Brazil + Mexico",
+    spawn: "1–6: 100% · 7–8: 70% · 9–10: 55%",
+    regularRule: "active 3+ of the 5 days",
+    groupExtra: { label: "Avg", key: "mean" },
+    groups: [
+      { name: "Casual (1–2 days)", share: 69,  p25: 2,  p50: 8,  p75: 19, p90: 23, mean: 11 },
+      { name: "Regular (3+ days)", share: 31,  p25: 24, p50: 43, p75: 64, p90: 85, mean: 46 },
+      { name: "All eligible",      share: 100, p25: 3,  p50: 15, p75: 30, p90: 58, mean: 22 }
+    ],
+    regulars: [
+      { name: "Non-payers",            regShare: 29, p50: 41, p75: 61, p90: 81 },
+      { name: "Low payers (<$50/90d)",  regShare: 61, p50: 61, p75: 81, p90: 99 },
+      { name: "High payers ($50+/90d)", regShare: 79, p50: 73, p75: 94, p90: 100 }
+    ],
+    bankCols: [["≥95%", "ge95"], ["≥80%", "ge80"], ["≥50%", "ge50"]],
+    bank: [
+      { size: 0,  mean: 46, ge95: 6,  ge80: 12, ge50: 41 },
+      { size: 10, mean: 50, ge95: 12, ge80: 20, ge50: 46 }
+    ]
+  },
   /* share of all battles that are normal (chest-eligible): the rest are exotic, PvP, story, boss */
   normalShare: 0.618
 };
@@ -1564,6 +1631,15 @@ function runPersona(kind) {
   render();
 }
 
+function loadPreset(id) {
+  cfg = id === "tech" ? techTestBalance() : structuredClone(DEFAULTS);
+  st = freshState();
+  $("mcOut").innerHTML = "";
+  toast(id === "tech" ? "Tech test balance loaded — 5 days" : "Full event balance loaded — 10 days");
+  render();
+  buildEditors();
+}
+
 function resetEvent() {
   st = freshState();
   $("mcOut").innerHTML = "";
@@ -1946,6 +2022,7 @@ function spawnSummary() {
 
 function renderPlayerData() {
   const b = battlesToFill();
+  const data = PLAYER_DATA[cfg.preset];
   const total = n => Math.round(n / PLAYER_DATA.normalShare);
   const maxLoot = cfg.chestsPerDay * cfg.eventDays * (cfg.chestMin + cfg.chestMax) / 2;
   const coins = pct => fmt(Math.round(maxLoot * pct / 100 / 100) * 100);
@@ -1959,24 +2036,32 @@ function renderPlayerData() {
     </div>
     <div class="note" style="margin-top:6px">Total battles assume ${Math.round(PLAYER_DATA.normalShare * 100)}% of battles are normal, as measured; the rest are exotic, PvP, story and boss battles, which never drop chests.</div>
     <table class="dataTbl">
-      <tr><th>% of max loot</th><th>Players</th><th>p25</th><th>Median</th><th>p75</th><th>p90</th><th>≥30%</th></tr>
-      ${PLAYER_DATA.groups.map(g => row([g.name, g.share + "%", g.p25 + "%", g.p50 + "%", g.p75 + "%", g.p90 + "%", g.ge30 + "%"])).join("")}
+      <tr><th>% of max loot</th><th>Players</th><th>p25</th><th>Median</th><th>p75</th><th>p90</th><th>${data.groupExtra.label}</th></tr>
+      ${data.groups.map(g => row([g.name, g.share + "%", g.p25 + "%", g.p50 + "%", g.p75 + "%", g.p90 + "%", g[data.groupExtra.key] + "%"])).join("")}
     </table>
     <table class="dataTbl">
       <tr><th>Regulars by segment</th><th>Regular</th><th>Median</th><th>p75</th><th>p90</th></tr>
-      ${PLAYER_DATA.regulars.map(g => row([g.name, g.regShare + "%", `${g.p50}% · ${coins(g.p50)}`, `${g.p75}% · ${coins(g.p75)}`, `${g.p90}% · ${coins(g.p90)}`])).join("")}
+      ${data.regulars.map(g => row([g.name, g.regShare + "%", `${g.p50}% · ${coins(g.p50)}`, `${g.p75}% · ${coins(g.p75)}`, `${g.p90}% · ${coins(g.p90)}`])).join("")}
     </table>
     <table class="dataTbl">
-      <tr><th>Regulars by catch-up bank</th><th>Avg loot</th><th>≥95%</th><th>≥75%</th><th>≥50%</th></tr>
-      ${PLAYER_DATA.bank.map(g => row([g.size ? g.size + " chests" : "No bank", g.mean + "%", g.ge95 + "%", g.ge75 + "%", g.ge50 + "%"])).join("")}
+      <tr><th>Regulars by catch-up bank</th><th>Avg loot</th>${data.bankCols.map(([label]) => `<th>${label}</th>`).join("")}</tr>
+      ${data.bank.map(g => row([g.size ? g.size + " chests" : "No bank", g.mean + "%", ...data.bankCols.map(([, key]) => g[key] + "%")])).join("")}
     </table>
-    <div class="note">Measured 20–29 Oct 2026, league ≥ 1, ${"1–5: 100% · 6–8: 60% · 9–10: 45%"}. The first two tables are without a bank;
+    <div class="note">Measured ${data.measured}, spawn ${data.spawn}. The first two tables are without a bank;
       casual players gain under 1 point from any bank size. Percentages are of max chest loot,
       so they hold when coin values change; coin figures use the current chest range. They do <b>not</b> update when you edit the
-      spawn chances — re-query DataWhisper for that. "Regular" = active 5+ of the 10 days; share = % of that payer segment.</div>`;
+      spawn chances — re-query DataWhisper for that. "Regular" = ${data.regularRule}; share = % of that payer segment.</div>`;
+}
+
+function renderPresetControls() {
+  $("btnPresetFull").classList.toggle("on", cfg.preset === "full");
+  $("btnPresetTech").classList.toggle("on", cfg.preset === "tech");
+  $("chkCatchUp").checked = cfg.catchUpEnabled;
+  $("catchUpTxt").textContent = `up to ${cfg.catchUpBank} chests`;
 }
 
 function render() {
+  renderPresetControls();
   renderHeader();
   renderPasses();
   renderProgress();
@@ -2064,10 +2149,6 @@ function buildEditors() {
       /* keep one spawn chance per chest: pad with the last chance or trim */
       const last = cfg.chestSpawn[cfg.chestSpawn.length - 1] ?? 1;
       cfg.chestSpawn = Array.from({ length: Math.max(1, Math.round(v)) }, (_, i) => cfg.chestSpawn[i] ?? last);
-    }),
-    toggleField("Catch-up rule enabled", () => cfg.catchUpEnabled, v => {
-      cfg.catchUpEnabled = v;
-      if (!v) st.bank = 0;
     }),
     numField("Catch-up bank (chests)", () => cfg.catchUpBank, v => {
       cfg.catchUpBank = v;
@@ -2201,6 +2282,13 @@ $("btnX2").onclick = () => runPersona("x2");
 $("btnX4").onclick = () => runPersona("x4");
 $("btnWhale").onclick = () => runPersona("whale");
 $("btnReset").onclick = resetEvent;
+$("btnPresetFull").onclick = () => loadPreset("full");
+$("btnPresetTech").onclick = () => loadPreset("tech");
+$("chkCatchUp").onchange = e => {
+  cfg.catchUpEnabled = e.target.checked;
+  if (!cfg.catchUpEnabled) st.bank = 0;
+  render();
+};
 $("btnMC").onclick = () => runMonteCarlo(500);
 $("btnAddOffer").onclick = () => {
   cfg.offers.push({
