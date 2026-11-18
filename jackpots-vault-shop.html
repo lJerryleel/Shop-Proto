@@ -1059,11 +1059,9 @@ const DEFAULTS = {
   unitName: "Khabib",
   unitDesc: "This papakha-wearing heavyweight tackles enemy mobs to “smesh” them into instant submission.",
   /* post-unlock level track: each step pays exactly the cards for the next level of the unit.
-     The first introLevels steps cost levelIntroCost, every later one levelCost — tuned so a maxed
-     x4 lands on 30 level-ups and a whale buying every pack reaches level 100 */
-  levelIntroCost: 1000,
-  levelIntroLevels: 10,
-  levelCost: 2500,
+     One price per 10 levels (2–10, 11–20, … 91–100), rising by an even step so no stage jumps
+     sharply; level 100 costs 232,400, within 100 of the old 1,000 × 10 then 2,500 track */
+  levelStageCosts: [600, 1000, 1400, 1700, 2100, 2500, 2900, 3300, 3700, 4100],
 
   /* chance that the Nth chest of the day spawns on a normal battle (index 0 = 1st chest) */
   chestSpawn: [1, 1, 1, 1, 1, 0.6, 0.6, 0.6, 0.45, 0.45],
@@ -1127,7 +1125,8 @@ const DEFAULTS = {
     { amt: 5000,  usd: 5.99, limit: 3 },
     { amt: 10000, usd: 9.99, limit: 3 }
   ],
-  packRefreshDays: 3,
+  /* windows on days 1, 3, 5, 7, 9, so a whale who joins by day 4 still reaches level 100 */
+  packRefreshDays: 2,
 
   lockedAvatarPool: 8
 };
@@ -1141,11 +1140,10 @@ function techTestBalance() {
     eventDays: 5,
     catchUpEnabled: false,
     unlockTarget: 12000,
-    levelIntroCost: 500,
-    levelCost: 1250,
+    levelStageCosts: [300, 500, 700, 850, 1050, 1250, 1450, 1650, 1850, 2050],
     chestSpawn: [1, 1, 1, 1, 1, 1, 0.7, 0.7, 0.55, 0.55],
     avatarPrice: DEFAULTS.avatarPrice.map(price => price / 2),
-    /* 3 windows (d1, d3, d5) × limit 4 = the same 12 of each pack as the full event */
+    /* 3 windows (d1, d3, d5) × limit 4, so a whale who joins by day 2 still reaches level 100 */
     packs: [
       { amt: 1000, usd: 2.99, limit: 4 },
       { amt: 2500, usd: 5.99, limit: 4 },
@@ -1159,6 +1157,7 @@ function techTestBalance() {
 
 /* Cards needed for each level-up of any card in game
    (Assets/_Game/Features/Armory/Config/EconomyConfig/Configs/CoinRework.csv, first row). */
+const LEVEL_STAGE_LEVELS = 10;
 const CARD_LEVEL_CARDS = [3,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100,105,110,115,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,950,1000,1050,1100,1150,1200,1250,1300,1350,1500,2000,2500,3000,3500,4000,4500,5000,5500,6000,6500,7000,7500,8000,8500,9000,9500,10000,10500,11000,11500,12000,12500,13000,13500,15000,20000,25000,30000,35000,40000,45000,50000,55000,60000,65000,70000,75000,80000,85000,90000,95000,100000,105000,110000,115000,120000,125000,130000,135000];
 
 /* Measured with DataWhisper. Values are % of the max chest loot over the event, without a catch-up
@@ -1342,7 +1341,19 @@ function progression() {
 
 /* coins for the level-up that takes the unit past `levelUps` completed level-ups */
 function levelUpCost(levelUps) {
-  return Math.max(1, levelUps < cfg.levelIntroLevels ? cfg.levelIntroCost : cfg.levelCost);
+  return Math.max(1, cfg.levelStageCosts[levelStage(levelUps + 2)]);
+}
+
+/* 0 for levels 1–10, 1 for 11–20, … 9 for 91–100 */
+function levelStage(level) {
+  return Math.min(cfg.levelStageCosts.length - 1, Math.floor((level - 1) / LEVEL_STAGE_LEVELS));
+}
+
+/* "levels 2–10", "levels 11–20", … — the first stage starts at 2 because level 1 is the unlock */
+function levelStageName(stage) {
+  const first = Math.max(2, stage * LEVEL_STAGE_LEVELS + 1);
+  const last = stage === cfg.levelStageCosts.length - 1 ? CARD_LEVEL_CARDS.length + 1 : (stage + 1) * LEVEL_STAGE_LEVELS;
+  return `levels ${first}–${last}`;
 }
 
 function toast(msg) {
@@ -1831,7 +1842,7 @@ function renderProgress() {
   const p = progression();
   $("unitName").textContent = p.unlocked ? cfg.unitName + " ✓" : cfg.unitName;
   $("unitDesc").textContent = p.unlocked
-    ? `Unlocked. Each level-up costs ${fmt(cfg.levelIntroCost)} for the first ${cfg.levelIntroLevels}, then ${fmt(cfg.levelCost)} — level ${p.levelUps + 1} so far (${fmt(p.cards)} cards).`
+    ? `Unlocked. Level-ups cost ${fmt(cfg.levelStageCosts[0])}, rising every ${LEVEL_STAGE_LEVELS} levels up to ${fmt(cfg.levelStageCosts[cfg.levelStageCosts.length - 1])} — level ${p.levelUps + 1} so far (${fmt(p.cards)} cards).`
     : cfg.unitDesc;
   const txt = `${fmt(p.cur)}/${fmt(p.max)}`;
   const w = (p.pct * 100).toFixed(1) + "%";
@@ -2114,7 +2125,6 @@ function clampState() {
   cfg.eventDays = Math.max(1, Math.round(cfg.eventDays));
   cfg.chestsPerDay = Math.max(0, Math.round(cfg.chestsPerDay));
   cfg.catchUpBank = Math.max(0, Math.round(cfg.catchUpBank));
-  cfg.levelIntroLevels = Math.max(0, Math.round(cfg.levelIntroLevels));
   if (cfg.chestMax < cfg.chestMin) cfg.chestMax = cfg.chestMin;
   for (const o of cfg.offers) {
     o.limit = Math.max(0, Math.round(o.limit));
@@ -2173,9 +2183,8 @@ function buildEditors() {
   const e2 = $("editProg"); e2.innerHTML = "";
   e2.append(
     numField("Unlock target (spent)", () => cfg.unlockTarget, v => cfg.unlockTarget = v, 100),
-    numField("Level track — intro level-ups", () => cfg.levelIntroLevels, v => cfg.levelIntroLevels = v),
-    numField("Level track — intro cost per level", () => cfg.levelIntroCost, v => cfg.levelIntroCost = v, 100),
-    numField("Level track — cost per level after", () => cfg.levelCost, v => cfg.levelCost = v, 100)
+    ...cfg.levelStageCosts.map((_, i) =>
+      numField(`Level track — cost per level, ${levelStageName(i)}`, () => cfg.levelStageCosts[i], v => cfg.levelStageCosts[i] = v, 50))
   );
 
   /* passes */
