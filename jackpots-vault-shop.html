@@ -1131,8 +1131,8 @@ const DEFAULTS = {
   lockedAvatarPool: 8
 };
 
-/* 5-day tech test in Brazil & Mexico (design doc §11). Half the days and every coin price halved,
-   so each persona reaches about the same milestones; pass bonuses and $ prices are unchanged. */
+/* 5-day tech test in Brazil & Mexico (design doc §11). Half the days and cheaper general offers
+   (balance spreadsheet, Sheet2); pass bonuses, IP avatars and $ prices are unchanged. */
 function techTestBalance() {
   const b = structuredClone(DEFAULTS);
   Object.assign(b, {
@@ -1142,7 +1142,6 @@ function techTestBalance() {
     unlockTarget: 12000,
     levelStageCosts: [300, 500, 700, 850, 1050, 1250, 1450, 1650, 1850, 2050],
     chestSpawn: [1, 1, 1, 1, 1, 1, 0.7, 0.7, 0.55, 0.55],
-    avatarPrice: DEFAULTS.avatarPrice.map(price => price / 2),
     /* 3 windows (d1, d3, d5) × limit 4, so a whale who joins by day 2 still reaches level 100 */
     packs: [
       { amt: 1000, usd: 2.99, limit: 4 },
@@ -1151,9 +1150,27 @@ function techTestBalance() {
     ],
     packRefreshDays: 2
   });
-  for (const o of b.offers) o.price /= 2;
+  for (const o of b.offers) Object.assign(o, TECH_TEST_OFFERS[o.id]);
   return b;
 }
+
+const TECH_TEST_OFFERS = {
+  rp1000:   { price: 1500 },
+  skipits:  { price: 2000 },
+  rbpA:     { price: 750 },
+  avchest:  { price: 1500 },
+  mobtok:   { price: 500, amt: "250" },
+  rp100:    { price: 600 },
+  bpA:      { price: 400 },
+  bertha:   { price: 300 },
+  pup1:     { price: 250 },
+  pup2:     { price: 250 },
+  rarepack: { price: 300, amt: "2" },
+  caveman:  { price: 100 },
+  lucky:    { price: 100 },
+  bpack:    { price: 100 },
+  coins:    { price: 50, amt: "5,000" }
+};
 
 /* Cards needed for each level-up of any card in game
    (Assets/_Game/Features/Armory/Config/EconomyConfig/Configs/CoinRework.csv, first row). */
